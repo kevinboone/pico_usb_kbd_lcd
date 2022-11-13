@@ -10,7 +10,24 @@
 #include "bsp/board.h"
 #include "tusb.h"
 
-#define HID_MAX_KEYS 0x67
+// For completeness, define the maximum number of keys in the selected
+//   keyboard layout. A USB scan code is in the range 1-127 but mst
+//   keyboards do not use all these codes. In principle, we should test
+//   that an incoming keycode is in the right range, but for simplicity
+//   here we trust the keyboard (and TinyUSB) to do the right thing.
+#define HID_MAX_KEYS 103 
+
+/* ==================  Keycode translation table. ==================== */
+
+/*
+ * We only need one translation table, as this simple application only
+ * supports 102-key US layouts. We need separate translations for
+ * non-shifted and shifted keys because shift is not just a modifier:
+ * shift turns a '5' to a '$', for example. We don't need a separate
+ * column for 'ctrl', because we can handle that simply by logical
+ * AND operations on the keycode. Alt/Meta does not affect the keycode
+ * at all -- it's just a flag. 
+ */ 
 
 // TODO: fill in the rest of the non-ASCII key codes
 // There's a nice list here:
@@ -74,7 +91,6 @@ static int conv_table_us[128][2] =
     {','   , '<'    }, /* 0x36 */ \
     {'.'   , '>'    }, /* 0x37 */ \
     {'/'   , '?'    }, /* 0x38 */ \
-                                  \
     {0     , 0      }, /* 0x39 */ \
     {0     , 0      }, /* 0x3a */ \
     {0     , 0      }, /* 0x3b */ \
@@ -122,27 +138,35 @@ static int conv_table_us[128][2] =
     {'='   , '='    }, /* 0x67 */ \
 };
 
+/* =================  End keycode translation table. ================== */
+
 /*===========================================================================
  * is_key_held 
  * Check whether the current key scancode is a repetition of the previous
- * one. In the longer term, we need to handle hold-down auto-repeat. For
- * now, it's easier just to filter the repeats. 
+ * one. One USB report can contain multiple keystrokes, if one key is pressed
+ * before another is released. As each new key is pressed, a new report
+ * is delivered that contains the keystrokes of the set of keys that
+ * are down. As a result, the same keystroke can be found in multiple
+ * successive reports.  
  * ========================================================================*/
 static inline bool is_key_held (hid_keyboard_report_t const *report, 
     uint8_t keycode)
   {
-  for(uint8_t i=0; i<6; i++) 
+  for (uint8_t i=0; i < 6; i++) 
     {
     if (report->keycode[i] == keycode) 
-      {
       return true;
-      }
     }
   return false;
   }
 
 /*===========================================================================
  * process_kbd_report 
+ * Process a report from a keyboard device. The report will contain up
+ * to 6 keystrokes, each representing a different key that is down.
+ * We need to filter duplicate keystrokes that arise when multiple keys
+ * are pressed such that one key is pressed before another is released.
+ * This is quite common when typing quickly on a decent keyboard.  
  * ========================================================================*/
 static void process_kbd_report (hid_keyboard_report_t const *report)
   {
@@ -150,7 +174,7 @@ static void process_kbd_report (hid_keyboard_report_t const *report)
 	
   for (uint8_t i=0; i < 6; i++) 
     {
-    if (report->keycode[i] ) 
+    if (report->keycode[i]) 
       {
       if (!is_key_held (&prev_report, report->keycode[i])) 
         {
@@ -165,6 +189,8 @@ static void process_kbd_report (hid_keyboard_report_t const *report)
         if (is_shift_pressed) flags |= KBD_FLAG_SHIFT;
         if (is_ctrl_pressed) flags |= KBD_FLAG_CONTROL;
         if (is_alt_pressed) flags |= KBD_FLAG_ALT;
+        // Call back into the application, passing the keystroke and a
+        //   set of flags that indicate which modifiers are held down.
         kbd_raw_key_down (ch, flags); 
 	}
       }
@@ -182,18 +208,13 @@ void tuh_hid_mount_cb (uint8_t dev_addr, uint8_t instance,
   {
   (void) desc_len; (void) desc_report;
 
+  /* Ask for a report only if this is a keyboard device */
   uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
-  if (itf_protocol == HID_ITF_PROTOCOL_NONE) 
+  if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) 
     {
-    printf("Device with address %d, instance %d is not a keyboard or mouse.\r\n", dev_addr, instance);
-    return;
+    tuh_hid_receive_report (dev_addr, instance);
     }
-  
-  const char* protocol_str[] = { "None", "Keyboard", "Mouse" };
-  printf("Device with address %d, instance %d is a %s.\r\n", 
-    dev_addr, instance, protocol_str[itf_protocol]);
 
-  tuh_hid_receive_report(dev_addr, instance);
   }
 
 /*===========================================================================
@@ -204,19 +225,18 @@ void tuh_hid_report_received_cb  (uint8_t dev_addr, uint8_t instance,
       uint8_t const* report, uint16_t len)
   {
   (void) instance; (void) len;
+  // In principle we don't need to test that this USB report came from
+  //   a keyboard, since we are only asking for reports from keyboards.
+  // But, for future expansion, we should be systematic
   switch (tuh_hid_interface_protocol (dev_addr, instance)) 
     {
     case HID_ITF_PROTOCOL_KEYBOARD:
       process_kbd_report ((hid_keyboard_report_t const*) report);
       break;
-    /*
-    // We could handle mouse here, too, if necessary
-    case HID_ITF_PROTOCOL_MOUSE:
-      process_mouse_report ((hid_mouse_report_t const*) report);
-      break;
-    */
     }
 
+  // Ask the device for the next report -- asking for a report is a
+  //   one-off operation, and must be repeated by the application. 
   tuh_hid_receive_report (dev_addr, instance);
   }
 
@@ -226,6 +246,7 @@ void tuh_hid_report_received_cb  (uint8_t dev_addr, uint8_t instance,
  * ========================================================================*/
 void tuh_hid_umount_cb (uint8_t dev_addr, uint8_t instance)
   {
+  // We don't need to do anything here.
   (void) dev_addr;
   (void) instance;
   }

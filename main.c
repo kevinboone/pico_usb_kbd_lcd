@@ -13,6 +13,11 @@
 #include "bsp/board.h"
 #include "config.h"
 
+// Irritatingly, this I2C_LCD object has to have global scope -- it's not
+//   just laziness on my part. The TinyUSB callbacks carry no 
+//   application-specific context, so there's no way (for example) to
+//   associate a specific keyboard with a specific display device. 
+//   This isn't a problem in practice -- it's just unsightly.
 I2C_LCD *i2c_lcd;
 
 /*===========================================================================
@@ -34,7 +39,7 @@ void blink_led_task (void)
 /*===========================================================================
  * kbd_raw_key_down is called by the USB HID code whenever a
  * key is pressed. The value 'code' does not take account of which
- * modifiers are pressed -- call kbd_to_ascii to deal wity that.
+ * modifiers are pressed -- call kbd_to_ascii() to deal wity that.
  * ========================================================================*/
 void kbd_raw_key_down (int code, int flags)
   {
@@ -44,13 +49,15 @@ void kbd_raw_key_down (int code, int flags)
   //i2c_lcd_print_string (i2c_lcd, s);
   switch (code)
     {
+    // Handle scrollback using up/down keys. All other keys, pass 
+    //   straight through to the display.
     case KBD_KEY_UP:
       i2c_lcd_scrollback_line_up (i2c_lcd);
       break;
     case KBD_KEY_DOWN:
       i2c_lcd_scrollback_line_down (i2c_lcd);
       break;
-    // TODO scrollback page up
+    // TODO scrollback page up/down
     default:
       char c = kbd_to_ascii (code, flags);
       i2c_lcd_print_char (i2c_lcd, c);
@@ -62,16 +69,19 @@ void kbd_raw_key_down (int code, int flags)
  * ========================================================================*/
 int main (void)
   {
+  // Initialize the display
   i2c_lcd = i2c_lcd_new (LCD_WIDTH, LCD_HEIGHT, I2C_LCD_ADDRESS, 
      PICO_DEFAULT_I2C_INSTANCE,
      PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN, I2C_BAUD, 
      SCROLLBACK_PAGES);
 
+  // Write some initial text, so we know the display is working
   i2c_lcd_set_cursor (i2c_lcd, 0, 0);
   i2c_lcd_print_string (i2c_lcd, "Hello ");
 
   usb_kbd_init();
 
+  // Loop, dispatching USB events to the handler and blinking the LED
   while (1) 
     {
     usb_kbd_scan();
