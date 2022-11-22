@@ -237,7 +237,7 @@ I2C_LCD *i2c_lcd_new (int width, int height, int addr, i2c_inst_t *i2c,
   self->implicit_lf = TRUE;
   self->destructive_backspace = TRUE; 
   self->scrollback_max_lines = scrollback_pages * self->height; 
-  self->scrollback_buffer = malloc (self->width * self->height);
+  self->scrollback_buffer = malloc (self->width * self->scrollback_max_lines);
   reset_scrollback (self);
 
   i2c_init (i2c, i2c_baud);
@@ -571,6 +571,7 @@ void i2c_lcd_scrollback_line_down (I2C_LCD *self)
  * ==========================================================================*/
 void i2c_lcd_destroy (I2C_LCD* self)
   {
+  free (self->scrollback_buffer);
   free (self);
   }
 

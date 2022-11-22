@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required (VERSION 3.13)
 
 include(pico_sdk_import.cmake)
 set (BINARY "pico_usb_kbd_lcd") 
